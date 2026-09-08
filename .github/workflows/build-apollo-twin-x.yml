@@ -14,8 +14,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract source package
+        run: |
+          rm -rf source
+          mkdir source
+          unzip -q Cecko2-Apollo-Twin-X.zip -d source
+
       - name: Configure DSP core
-        run: cmake -S . -B build-core
+        run: cmake -S source -B build-core
 
       - name: Build DSP core tests
         run: cmake --build build-core --parallel 2
@@ -28,6 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract source package
+        run: |
+          rm -rf source
+          mkdir source
+          ditto -x -k Cecko2-Apollo-Twin-X.zip source
+
       - name: Checkout Steinberg VST3 SDK
         uses: actions/checkout@v4
         with:
@@ -37,7 +49,7 @@ jobs:
 
       - name: Configure Intel VST3
         run: >-
-          cmake -S . -B build-vst3 -G Xcode
+          cmake -S source -B build-vst3 -G Xcode
           -DBUILD_VST3_ADAPTER=ON
           -DVST3_SDK_DIR="$GITHUB_WORKSPACE/vst3sdk"
           -DCMAKE_OSX_ARCHITECTURES=x86_64
@@ -68,6 +80,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract source package
+        shell: pwsh
+        run: |
+          Remove-Item source -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -Path Cecko2-Apollo-Twin-X.zip -DestinationPath source -Force
+
       - name: Checkout Steinberg VST3 SDK
         uses: actions/checkout@v4
         with:
@@ -77,7 +95,7 @@ jobs:
 
       - name: Configure VST3
         shell: pwsh
-        run: cmake -S . -B build-vst3 -A x64 -DBUILD_VST3_ADAPTER=ON "-DVST3_SDK_DIR=$env:GITHUB_WORKSPACE/vst3sdk" -DSMTG_CREATE_PLUGIN_LINK=OFF
+        run: cmake -S source -B build-vst3 -A x64 -DBUILD_VST3_ADAPTER=ON "-DVST3_SDK_DIR=$env:GITHUB_WORKSPACE/vst3sdk" -DSMTG_CREATE_PLUGIN_LINK=OFF
 
       - name: Build VST3
         run: cmake --build build-vst3 --config Release --target ApolloTwinXCharacter --parallel 4
@@ -87,7 +105,6 @@ jobs:
         run: |
           $vst = Get-ChildItem build-vst3 -Recurse -Directory -Filter 'ApolloTwinXCharacter.vst3' | Select-Object -First 1
           if (-not $vst) { throw 'VST3 bundle not found' }
-
           New-Item -ItemType Directory -Force artifact | Out-Null
           Copy-Item $vst.FullName artifact/ -Recurse
           Compress-Archive -Path artifact/ApolloTwinXCharacter.vst3 -DestinationPath artifact/Apollo-Twin-X-Character-Windows-x64.zip
