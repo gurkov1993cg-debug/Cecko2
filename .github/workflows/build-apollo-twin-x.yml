@@ -1,1 +1,76 @@
+name: Build Apollo Twin X Character
 
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract source package
+        run: |
+          rm -rf source
+          mkdir source
+          unzip -q Cecko2-Apollo-Twin-X.zip -d source
+
+      - name: Configure DSP core
+        run: cmake -S source -B build-core
+
+      - name: Build DSP core tests
+        run: cmake --build build-core --parallel 2
+
+      - name: Run DSP tests
+        run: ctest --test-dir build-core --output-on-failure
+
+  macos-intel-vst3:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract source package
+        run: |
+          rm -rf source
+          mkdir source
+          ditto -x -k Cecko2-Apollo-Twin-X.zip source
+
+      - name: Checkout Steinberg VST3 SDK
+        uses: actions/checkout@v4
+        with:
+          repository: steinbergmedia/vst3sdk
+          path: vst3sdk
+          submodules: recursive
+
+      - name: Configure Intel VST3
+        run: >-
+          cmake -S source -B build-vst3 -G Xcode
+          -DBUILD_VST3_ADAPTER=ON
+          -DVST3_SDK_DIR="$GITHUB_WORKSPACE/vst3sdk"
+          -DCMAKE_OSX_ARCHITECTURES=x86_64
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+          -DSMTG_CREATE_PLUGIN_LINK=OFF
+
+      - name: Build Intel VST3
+        run: cmake --build build-vst3 --config Release --target ApolloTwinXCharacter --parallel 4
+
+      - name: Collect VST3
+        shell: bash
+        run: |
+          VST=$(find build-vst3 -type d -name 'ApolloTwinXCharacter.vst3' -print -quit)
+          test -n "$VST"
+          test -f "$VST/Contents/MacOS/ApolloTwinXCharacter"
+          mkdir -p artifact
+          cp -R "$VST" artifact/
+          ditto -c -k --sequesterRsrc --keepParent "$VST" artifact/Apollo-Twin-X-Character-macOS-Intel.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Apollo-Twin-X-Character-macOS-Intel
+          path: artifact
+          retention-days: 30
