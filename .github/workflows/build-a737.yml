@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Extract A737 source package
         shell: bash
@@ -44,7 +44,7 @@ jobs:
           fi
 
       - name: Checkout Steinberg VST3 SDK 3.7.10
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: steinbergmedia/vst3sdk
           ref: v3.7.10_build_14
