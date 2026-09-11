@@ -1,0 +1,120 @@
+name: Build A737 macOS Intel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'A737-source.zip'
+      - '.github/workflows/build-a737.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a737-macos-intel
+  cancel-in-progress: true
+
+jobs:
+  macos-intel-vst3:
+    runs-on: macos-15-intel
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '10.13'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract A737 source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf source
+          mkdir -p source
+          ditto -x -k A737-source.zip source
+
+          if [ -f source/A737/CMakeLists.txt ]; then
+            echo "A737_SOURCE=$GITHUB_WORKSPACE/source/A737" >> "$GITHUB_ENV"
+          elif [ -f source/CMakeLists.txt ]; then
+            echo "A737_SOURCE=$GITHUB_WORKSPACE/source" >> "$GITHUB_ENV"
+          else
+            echo "ERROR: CMakeLists.txt not found after extracting A737-source.zip"
+            find source -maxdepth 3 -type f -print || true
+            exit 1
+          fi
+
+      - name: Checkout Steinberg VST3 SDK 3.7.10
+        uses: actions/checkout@v4
+        with:
+          repository: steinbergmedia/vst3sdk
+          ref: v3.7.10_build_14
+          path: vst3sdk
+          submodules: recursive
+
+      - name: Configure DSP tests
+        shell: bash
+        run: |
+          cmake -S "$A737_SOURCE" -B build-tests \
+            -DA737_BUILD_TESTS=ON \
+            -DA737_BUILD_VST3=OFF \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+
+      - name: Build DSP tests
+        run: cmake --build build-tests --config Release --parallel 4
+
+      - name: Run DSP tests
+        run: ctest --test-dir build-tests -C Release --output-on-failure
+
+      - name: Configure A737 VST3
+        shell: bash
+        run: |
+          cmake -S "$A737_SOURCE" -B build-vst3 -G Xcode \
+            -DA737_BUILD_TESTS=OFF \
+            -DA737_BUILD_VST3=ON \
+            -DA737_VST3_SDK_ROOT="$GITHUB_WORKSPACE/vst3sdk" \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+            -DSMTG_CREATE_PLUGIN_LINK=OFF
+
+      - name: Build A737 VST3
+        run: cmake --build build-vst3 --config Release --target A737 --parallel 4
+
+      - name: Locate and validate VST3
+        shell: bash
+        run: |
+          set -euo pipefail
+          VST="$(find build-vst3 -type d -name 'A737.vst3' -print -quit)"
+          test -n "$VST"
+
+          BIN="$(find "$VST/Contents/MacOS" -type f -print -quit)"
+          test -n "$BIN"
+
+          file "$BIN" | tee binary-info.txt
+          file "$BIN" | grep -q 'x86_64'
+
+          xcrun vtool -show-build "$BIN" | tee deployment-info.txt
+          grep -Eq 'minos[[:space:]]+10\.13|version[[:space:]]+10\.13' deployment-info.txt
+
+          echo "A737_VST=$VST" >> "$GITHUB_ENV"
+
+      - name: Package A737
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf artifact
+          mkdir -p artifact
+
+          ditto "$A737_VST" artifact/A737.vst3
+          cp binary-info.txt deployment-info.txt artifact/
+          ditto -c -k --sequesterRsrc --keepParent \
+            artifact/A737.vst3 \
+            artifact/A737-macOS-Intel.zip
+
+      - name: Upload A737 macOS Intel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: A737-macOS-Intel
+          path: artifact
+          retention-days: 7
+          if-no-files-found: error
